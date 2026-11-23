@@ -1,0 +1,254 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0 / Global Safety Net: Default deny everything unless explicitly allowed below
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Hardened Global Primitives
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidRunId(id) {
+      return id is string && id.size() >= 8 && id.size() <= 64 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidNickname(name) {
+      return name is string
+        && name.size() >= 2
+        && name.size() <= 10
+        && name.matches('^[가-힣a-zA-Z0-9_]{2,10}$');
+    }
+
+    function isValidTagCode(tag) {
+      return tag is string && tag.size() == 4 && tag.matches('^[A-Z0-9]{4}$');
+    }
+
+    function isValidTieBreaker(tb) {
+      return tb is string && tb.size() >= 8 && tb.size() <= 16 && tb.matches('^[a-z0-9]+$');
+    }
+
+    function isValidRuleVersion(ver) {
+      return ver is string && ver.size() == 14 && ver == 'v1_course_5314';
+    }
+
+    function isValidScorePayload(data) {
+      return data.normalCount is int
+        && data.normalCount >= 0
+        && data.normalCount <= 231
+        && data.goldenCount is int
+        && data.goldenCount >= 0
+        && data.goldenCount <= 32
+        && data.distanceMeters is int
+        && data.distanceMeters >= 0
+        && data.distanceMeters <= 1404
+        && data.cleared is bool
+        && (!data.cleared || data.distanceMeters >= 1339)
+        && data.score is int
+        && data.score >= 0
+        && data.score <= 5314
+        && data.score == (data.distanceMeters + data.normalCount * 10 + data.goldenCount * 50);
+    }
+
+    // Pillar 2: Standalone Validation Blueprints (called on create & update, no resource/diff inside)
+    function isValidScoreRun(data, runId) {
+      return data.keys().hasAll([
+          'runId',
+          'userId',
+          'nickname',
+          'tagCode',
+          'ruleVersion',
+          'score',
+          'normalCount',
+          'goldenCount',
+          'distanceMeters',
+          'cleared',
+          'submittedAt'
+        ])
+        && data.keys().hasOnly([
+          'runId',
+          'userId',
+          'nickname',
+          'tagCode',
+          'ruleVersion',
+          'score',
+          'normalCount',
+          'goldenCount',
+          'distanceMeters',
+          'cleared',
+          'submittedAt'
+        ])
+        && isValidRunId(data.runId)
+        && data.runId == runId
+        && isValidId(data.userId)
+        && data.userId == request.auth.uid
+        && isValidNickname(data.nickname)
+        && isValidTagCode(data.tagCode)
+        && isValidRuleVersion(data.ruleVersion)
+        && isValidScorePayload(data)
+        && data.submittedAt is timestamp;
+    }
+
+    function isValidLeaderboardEntry(data, userId) {
+      return data.keys().hasAll([
+          'userId',
+          'nickname',
+          'tagCode',
+          'tieBreaker',
+          'ruleVersion',
+          'score',
+          'normalCount',
+          'goldenCount',
+          'distanceMeters',
+          'cleared',
+          'bestRunId',
+          'achievedAt',
+          'updatedAt',
+          'lastSubmittedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId',
+          'nickname',
+          'tagCode',
+          'tieBreaker',
+          'ruleVersion',
+          'score',
+          'normalCount',
+          'goldenCount',
+          'distanceMeters',
+          'cleared',
+          'bestRunId',
+          'achievedAt',
+          'updatedAt',
+          'lastSubmittedAt'
+        ])
+        && isValidId(data.userId)
+        && data.userId == userId
+        && data.userId == request.auth.uid
+        && isValidNickname(data.nickname)
+        && isValidTagCode(data.tagCode)
+        && isValidTieBreaker(data.tieBreaker)
+        && isValidRuleVersion(data.ruleVersion)
+        && isValidScorePayload(data)
+        && isValidRunId(data.bestRunId)
+        && data.achievedAt is timestamp
+        && data.updatedAt is timestamp
+        && data.lastSubmittedAt is timestamp;
+    }
+
+    // Pillar 7: Atomicity check confirming matching ScoreRun was created in the same transaction
+    function hasMatchingScoreRunAfter(runId, score) {
+      return existsAfter(/databases/$(database)/documents/score_runs/$(runId))
+        && getAfter(/databases/$(database)/documents/score_runs/$(runId)).data.userId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/score_runs/$(runId)).data.score == score
+        && getAfter(/databases/$(database)/documents/score_runs/$(runId)).data.ruleVersion == 'v1_course_5314';
+    }
+
+    function isNewHighScoreUpdate() {
+      return incoming().score > existing().score
+        && incoming().bestRunId != existing().bestRunId
+        && incoming().achievedAt == request.time
+        && incoming().updatedAt == request.time
+        && incoming().lastSubmittedAt == request.time
+        && request.time >= existing().lastSubmittedAt + duration.value(2, 's')
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'nickname',
+          'score',
+          'normalCount',
+          'goldenCount',
+          'distanceMeters',
+          'cleared',
+          'bestRunId',
+          'achievedAt',
+          'updatedAt',
+          'lastSubmittedAt'
+        ])
+        && hasMatchingScoreRunAfter(incoming().bestRunId, incoming().score);
+    }
+
+    function isNicknameSyncUpdate() {
+      return incoming().score == existing().score
+        && incoming().bestRunId == existing().bestRunId
+        && incoming().achievedAt == existing().achievedAt
+        && incoming().lastSubmittedAt == existing().lastSubmittedAt
+        && incoming().nickname != existing().nickname
+        && incoming().updatedAt == request.time
+        && request.time >= existing().updatedAt + duration.value(2, 's')
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'nickname',
+          'updatedAt'
+        ]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 1: Immutable Per-Run Submission Log (Deduplication by runId)
+    // -------------------------------------------------------------------------
+    match /score_runs/{runId} {
+      allow get: if isSignedIn()
+        && isValidRunId(runId)
+        && (resource == null || existing().userId == request.auth.uid);
+
+      allow list: if isSignedIn()
+        && existing().userId == request.auth.uid
+        && request.query.limit <= 20;
+
+      allow create: if isSignedIn()
+        && isValidRunId(runId)
+        && isValidScoreRun(incoming(), runId)
+        && incoming().submittedAt == request.time;
+
+      allow update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 2: Public Realtime Leaderboard (Rule Version v1_course_5314)
+    // Contains only public game stats & display nickname — zero PII/tokens.
+    // -------------------------------------------------------------------------
+    match /leaderboard_v1_course_5314/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+
+      // Pillar 8: Rule enforces public score boundary and bounded query limit (single-field index)
+      allow list: if isSignedIn()
+        && existing().score >= 0
+        && request.query.limit <= 60;
+
+      allow create: if isSignedIn()
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && isValidLeaderboardEntry(incoming(), userId)
+        && incoming().achievedAt == request.time
+        && incoming().updatedAt == request.time
+        && incoming().lastSubmittedAt == request.time
+        && hasMatchingScoreRunAfter(incoming().bestRunId, incoming().score);
+
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && userId == request.auth.uid
+        && isValidLeaderboardEntry(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().ruleVersion == existing().ruleVersion
+        && incoming().tagCode == existing().tagCode
+        && incoming().tieBreaker == existing().tieBreaker
+        && (isNewHighScoreUpdate() || isNicknameSyncUpdate());
+
+      allow delete: if false;
+    }
+  }
+}

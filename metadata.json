@@ -1,0 +1,6 @@
+{
+  "name": "탈주닌자송이",
+  "description": "과제는 내일의 송이에게. 오늘의 송이는 탈주한다! 달빛 아래 숙대 캠퍼스의 옥상과 테라스를 달리며 와이어 액션으로 눈꽃을 모으는 2D 횡스크롤 러닝 게임.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

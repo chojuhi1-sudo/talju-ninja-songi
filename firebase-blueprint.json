@@ -1,0 +1,198 @@
+{
+  "entities": {
+    "ScoreRun": {
+      "title": "ScoreRun",
+      "description": "Immutable single-run submission record used to deduplicate runs by runId and verify score integrity atomically.",
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string",
+          "description": "Unique client-generated run identifier matching the document ID.",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Anonymous Auth UID of the submitting player.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nickname": {
+          "type": "string",
+          "description": "Public player nickname (2-10 chars, Korean/English/digits/underscore).",
+          "minLength": 2,
+          "maxLength": 10,
+          "pattern": "^[가-힣a-zA-Z0-9_]{2,10}$"
+        },
+        "tagCode": {
+          "type": "string",
+          "description": "Short 4-char public discriminator code derived from UID hash.",
+          "minLength": 4,
+          "maxLength": 4,
+          "pattern": "^[A-Z0-9]{4}$"
+        },
+        "ruleVersion": {
+          "type": "string",
+          "description": "Game ruleset version isolating incompatible scoring versions.",
+          "enum": ["v1_course_5314"],
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "score": {
+          "type": "integer",
+          "description": "Total score matching distanceMeters + normalCount*10 + goldenCount*50 (0..5314)."
+        },
+        "normalCount": {
+          "type": "integer",
+          "description": "Collected normal snowflakes (0..231)."
+        },
+        "goldenCount": {
+          "type": "integer",
+          "description": "Collected golden snowflakes (0..32)."
+        },
+        "distanceMeters": {
+          "type": "integer",
+          "description": "Distance traveled in meters (0..1404)."
+        },
+        "cleared": {
+          "type": "boolean",
+          "description": "Whether Songi arrived at Snowflower Plaza."
+        },
+        "submittedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of run submission."
+        }
+      },
+      "required": [
+        "runId",
+        "userId",
+        "nickname",
+        "tagCode",
+        "ruleVersion",
+        "score",
+        "normalCount",
+        "goldenCount",
+        "distanceMeters",
+        "cleared",
+        "submittedAt"
+      ]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Public best-score record for one anonymous user in a specific game rule version. Contains no PII or auth tokens.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Internal Firebase Auth UID matching the document ID (never rendered publicly in UI).",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nickname": {
+          "type": "string",
+          "description": "Public display nickname (2-10 chars).",
+          "minLength": 2,
+          "maxLength": 10,
+          "pattern": "^[가-힣a-zA-Z0-9_]{2,10}$"
+        },
+        "tagCode": {
+          "type": "string",
+          "description": "Short 4-char discriminator code for identical nicknames.",
+          "minLength": 4,
+          "maxLength": 4,
+          "pattern": "^[A-Z0-9]{4}$"
+        },
+        "tieBreaker": {
+          "type": "string",
+          "description": "Stable deterministic tie-breaking key derived from UID hash.",
+          "minLength": 8,
+          "maxLength": 16,
+          "pattern": "^[a-z0-9]+$"
+        },
+        "ruleVersion": {
+          "type": "string",
+          "description": "Game ruleset version.",
+          "enum": ["v1_course_5314"],
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "score": {
+          "type": "integer",
+          "description": "Personal best score (0..5314), strictly monotonic on updates."
+        },
+        "normalCount": {
+          "type": "integer",
+          "description": "Normal snowflakes from the best-score run (0..231)."
+        },
+        "goldenCount": {
+          "type": "integer",
+          "description": "Golden snowflakes from the best-score run (0..32)."
+        },
+        "distanceMeters": {
+          "type": "integer",
+          "description": "Distance in meters from the best-score run (0..1404)."
+        },
+        "cleared": {
+          "type": "boolean",
+          "description": "Whether the best-score run cleared Snowflower Plaza."
+        },
+        "bestRunId": {
+          "type": "string",
+          "description": "Run ID of the ScoreRun document that established this best score.",
+          "minLength": 8,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "achievedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when this personal best score was first achieved."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest document update."
+        },
+        "lastSubmittedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest high-score submission for cooldown enforcement."
+        }
+      },
+      "required": [
+        "userId",
+        "nickname",
+        "tagCode",
+        "tieBreaker",
+        "ruleVersion",
+        "score",
+        "normalCount",
+        "goldenCount",
+        "distanceMeters",
+        "cleared",
+        "bestRunId",
+        "achievedAt",
+        "updatedAt",
+        "lastSubmittedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/score_runs/{runId}": {
+      "schema": {
+        "$ref": "#/entities/ScoreRun"
+      },
+      "description": "Immutable per-run submission log keyed by unique runId for deduplication and atomic leaderboard verification."
+    },
+    "/leaderboard_v1_course_5314/{userId}": {
+      "schema": {
+        "$ref": "#/entities/LeaderboardEntry"
+      },
+      "description": "Public realtime leaderboard for rule version v1_course_5314, storing each anonymous user's single best record."
+    }
+  }
+}
